@@ -11,6 +11,8 @@
 #include <vector>
 #include <string>
 #include <memory>
+#include <thread>
+#include <chrono>
 
 #include <inference_engine.hpp>
 
@@ -22,40 +24,50 @@
 
 using namespace InferenceEngine;
 
-bool ParseAndCheckCommandLine(int argc, char *argv[]) {
+bool ParseAndCheckCommandLine(int argc, char *argv[])
+{
     // ---------------------------Parsing and validation of input args--------------------------------------
     slog::info << "Parsing input parameters" << slog::endl;
 
     gflags::ParseCommandLineNonHelpFlags(&argc, &argv, true);
-    if (FLAGS_h) {
+    if (FLAGS_h)
+    {
         showUsage();
         showAvailableDevices();
         return false;
     }
 
-    if (FLAGS_i.empty()) {
+    if (FLAGS_i.empty())
+    {
         throw std::logic_error("Parameter -i is not set");
     }
 
-    if (FLAGS_m.empty()) {
+    if (FLAGS_m.empty())
+    {
         throw std::logic_error("Parameter -m is not set");
     }
 
     return true;
 }
 
-int main(int argc, char *argv[]) {
-    try {
+int main(int argc, char *argv[])
+{
+    std::chrono::time_point<std::chrono::system_clock> start, end;
+    std::chrono::duration<double> elapsed_seconds;
+    try
+    {
         slog::info << "InferenceEngine: " << printable(*GetInferenceEngineVersion()) << slog::endl;
         // ------------------------------ Parsing and validation of input args ---------------------------------
-        if (!ParseAndCheckCommandLine(argc, argv)) {
+        if (!ParseAndCheckCommandLine(argc, argv))
+        {
             return 0;
         }
 
         /** This vector stores paths to the processed images **/
         std::vector<std::string> imageNames;
         parseInputFilesArguments(imageNames);
-        if (imageNames.empty()) throw std::logic_error("No suitable images were found");
+        if (imageNames.empty())
+            throw std::logic_error("No suitable images were found");
         // -----------------------------------------------------------------------------------------------------
 
         // --------------------------- 1. Load inference engine -------------------------------------
@@ -66,13 +78,15 @@ int main(int argc, char *argv[]) {
         slog::info << "Device info: " << slog::endl;
         slog::info << printable(ie.GetVersions(FLAGS_d)) << slog::endl;
 
-        if (!FLAGS_l.empty()) {
+        if (!FLAGS_l.empty())
+        {
             // CPU(MKLDNN) extensions are loaded as a shared library and passed as a pointer to base extension
             IExtensionPtr extension_ptr = make_so_pointer<IExtension>(FLAGS_l);
             ie.AddExtension(extension_ptr, "CPU");
             slog::info << "CPU Extension loaded: " << FLAGS_l << slog::endl;
         }
-        if (!FLAGS_c.empty()) {
+        if (!FLAGS_c.empty())
+        {
             // clDNN Extensions are loaded from an .xml description and OpenCL kernel files
             ie.SetConfig({{PluginConfigParams::KEY_CONFIG_FILE, FLAGS_c}}, "GPU");
             slog::info << "GPU Extension loaded: " << FLAGS_c << slog::endl;
@@ -98,45 +112,55 @@ int main(int argc, char *argv[]) {
             throw std::logic_error("The demo supports topologies with 1 or 2 inputs only");
         std::string lrInputBlobName = inputShapes.begin()->first;
         SizeVector lrShape = inputShapes[lrInputBlobName];
-        if (lrShape.size() != 4) {
+        if (lrShape.size() != 4)
+        {
             throw std::logic_error("Number of dimensions for an input must be 4");
         }
         // A model like single-image-super-resolution-???? may take bicubic interpolation of the input image as the
         // second input
         std::string bicInputBlobName;
-        if (inputShapes.size() == 2) {
+        if (inputShapes.size() == 2)
+        {
             bicInputBlobName = (++inputShapes.begin())->first;
             SizeVector bicShape = inputShapes[bicInputBlobName];
-            if (bicShape.size() != 4) {
+            if (bicShape.size() != 4)
+            {
                 throw std::logic_error("Number of dimensions for both inputs must be 4");
             }
-            if (lrShape[2] >= bicShape[2] && lrShape[3] >= bicShape[3]) {
+            if (lrShape[2] >= bicShape[2] && lrShape[3] >= bicShape[3])
+            {
                 lrInputBlobName.swap(bicInputBlobName);
                 lrShape.swap(bicShape);
-            } else if (!(lrShape[2] <= bicShape[2] && lrShape[3] <= bicShape[3])) {
+            }
+            else if (!(lrShape[2] <= bicShape[2] && lrShape[3] <= bicShape[3]))
+            {
                 throw std::logic_error("Each spatial dimension of one input must surpass or be equal to a spatial"
-                    "dimension of another input");
+                                       "dimension of another input");
             }
         }
 
         /** Collect images**/
         std::vector<cv::Mat> inputImages;
-        for (const auto &i : imageNames) {
+        for (const auto &i : imageNames)
+        {
             /** Get size of low resolution input **/
             int w = lrShape[3];
             int h = lrShape[2];
             int c = lrShape[1];
 
             cv::Mat img = cv::imread(i, c == 1 ? cv::IMREAD_GRAYSCALE : cv::IMREAD_COLOR);
-            if (img.empty()) {
+            if (img.empty())
+            {
                 slog::warn << "Image " + i + " cannot be read!" << slog::endl;
                 continue;
             }
-            if (c != img.channels()) {
+            if (c != img.channels())
+            {
                 slog::warn << "Number of channels of the image " << i << " is not equal to " << c << ". Skip it\n";
                 continue;
             }
-            if (w != img.cols || h != img.rows) {
+            if (w != img.cols || h != img.rows)
+            {
                 slog::warn << "Size of the image " << i << " is not equal to " << w << "x" << h << ". Resize it\n";
                 cv::resize(img, img, {w, h});
             }
@@ -144,11 +168,13 @@ int main(int argc, char *argv[]) {
             inputImages.push_back(img);
         }
 
-        if (inputImages.empty()) throw std::logic_error("Valid input images were not found!");
+        if (inputImages.empty())
+            throw std::logic_error("Valid input images were not found!");
 
         /** Setting batch size using image count **/
         inputShapes[lrInputBlobName][0] = inputImages.size();
-        if (!bicInputBlobName.empty()) {
+        if (!bicInputBlobName.empty())
+        {
             inputShapes[bicInputBlobName][0] = inputImages.size();
         }
         network.reshape(inputShapes);
@@ -160,12 +186,15 @@ int main(int argc, char *argv[]) {
         OutputsDataMap outputInfo(network.getOutputsInfo());
         // BlobMap outputBlobs;
         std::string firstOutputName;
-        for (auto &item : outputInfo) {
-            if (firstOutputName.empty()) {
+        for (auto &item : outputInfo)
+        {
+            if (firstOutputName.empty())
+            {
                 firstOutputName = item.first;
             }
             DataPtr outputData = item.second;
-            if (!outputData) {
+            if (!outputData)
+            {
                 throw std::logic_error("output data pointer is not valid");
             }
 
@@ -185,11 +214,13 @@ int main(int argc, char *argv[]) {
 
         // --------------------------- 6. Prepare input --------------------------------------------------------
         Blob::Ptr lrInputBlob = inferRequest.GetBlob(lrInputBlobName);
-        for (size_t i = 0; i < inputImages.size(); ++i) {
+        for (size_t i = 0; i < inputImages.size(); ++i)
+        {
             cv::Mat img = inputImages[i];
             matU8ToBlob<float_t>(img, lrInputBlob, i);
 
-            if (!bicInputBlobName.empty()) {
+            if (!bicInputBlobName.empty())
+            {
                 Blob::Ptr bicInputBlob = inferRequest.GetBlob(bicInputBlobName);
 
                 int w = bicInputBlob->getTensorDesc().getDims()[3];
@@ -204,20 +235,26 @@ int main(int argc, char *argv[]) {
         // -----------------------------------------------------------------------------------------------------
 
         // --------------------------- 7. Do inference ---------------------------------------------------------
+        start = std::chrono::system_clock::now();
         std::cout << "To close the application, press 'CTRL+C' here";
-        if (FLAGS_show) {
+        if (FLAGS_show)
+        {
             std::cout << " or switch to the output window and press any key";
         }
         std::cout << std::endl;
 
         slog::info << "Start inference" << slog::endl;
         inferRequest.Infer();
+
+        end = std::chrono::system_clock::now();
+        elapsed_seconds = end - start;
+        std::cout << "Step 7. took " << elapsed_seconds.count() << " seconds" << std::endl;
         // -----------------------------------------------------------------------------------------------------
 
         // --------------------------- 8. Process output -------------------------------------------------------
         const Blob::Ptr outputBlob = inferRequest.GetBlob(firstOutputName);
         LockedMemory<const void> outputBlobMapped = as<MemoryBlob>(outputBlob)->rmap();
-        const auto outputData = outputBlobMapped.as<float*>();
+        const auto outputData = outputBlobMapped.as<float *>();
 
         size_t numOfImages = outputBlob->getTensorDesc().getDims()[0];
         size_t numOfChannels = outputBlob->getTensorDesc().getDims()[1];
@@ -227,47 +264,57 @@ int main(int argc, char *argv[]) {
 
         slog::info << "Output size [N,C,H,W]: " << numOfImages << ", " << numOfChannels << ", " << h << ", " << w << slog::endl;
 
-        for (size_t i = 0; i < numOfImages; ++i) {
+        for (size_t i = 0; i < numOfImages; ++i)
+        {
             std::vector<cv::Mat> imgPlanes;
-            if (numOfChannels == 3) {
+            if (numOfChannels == 3)
+            {
                 imgPlanes = std::vector<cv::Mat>{
-                      cv::Mat(h, w, CV_32FC1, &(outputData[i * nunOfPixels * numOfChannels])),
-                      cv::Mat(h, w, CV_32FC1, &(outputData[i * nunOfPixels * numOfChannels + nunOfPixels])),
-                      cv::Mat(h, w, CV_32FC1, &(outputData[i * nunOfPixels * numOfChannels + nunOfPixels * 2]))};
-            } else {
+                    cv::Mat(h, w, CV_32FC1, &(outputData[i * nunOfPixels * numOfChannels])),
+                    cv::Mat(h, w, CV_32FC1, &(outputData[i * nunOfPixels * numOfChannels + nunOfPixels])),
+                    cv::Mat(h, w, CV_32FC1, &(outputData[i * nunOfPixels * numOfChannels + nunOfPixels * 2]))};
+            }
+            else
+            {
                 imgPlanes = std::vector<cv::Mat>{cv::Mat(h, w, CV_32FC1, &(outputData[i * nunOfPixels * numOfChannels]))};
 
                 // Post-processing for text-image-super-resolution models
                 cv::threshold(imgPlanes[0], imgPlanes[0], 0.5f, 1.0f, cv::THRESH_BINARY);
             };
 
-            for (auto & img : imgPlanes)
+            for (auto &img : imgPlanes)
                 img.convertTo(img, CV_8UC1, 255);
 
             cv::Mat resultImg;
             cv::merge(imgPlanes, resultImg);
 
-            if (FLAGS_show) {
+            if (FLAGS_show)
+            {
                 cv::imshow("result", resultImg);
                 cv::waitKey();
             }
 
-            std::string outImgName = std::string("sr_" + std::to_string(i + 1) + ".png");
+            std::string outImgName = std::string(imageNames.at(0) + ".png");
+            std::cout << outImgName << std::endl;
             cv::imwrite(outImgName, resultImg);
         }
         // -----------------------------------------------------------------------------------------------------
     }
-    catch (const std::exception &error) {
+    catch (const std::exception &error)
+    {
         slog::err << error.what() << slog::endl;
         return 1;
     }
-    catch (...) {
+    catch (...)
+    {
         slog::err << "Unknown/internal exception happened" << slog::endl;
         return 1;
     }
 
     slog::info << "Execution successful" << slog::endl;
-    slog::info << slog::endl << "This demo is an API example, for any performance measurements "
-                                "please use the dedicated benchmark_app tool from the openVINO toolkit" << slog::endl;
+    slog::info << slog::endl
+               << "This demo is an API example, for any performance measurements "
+                  "please use the dedicated benchmark_app tool from the openVINO toolkit"
+               << slog::endl;
     return 0;
 }
