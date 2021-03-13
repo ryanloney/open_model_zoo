@@ -7,7 +7,7 @@ import numpy as np
 import logging as log
 from openvino.inference_engine import IECore
 import matplotlib.pyplot as plt
-
+import time
 
 def main():
     # arguments
@@ -36,7 +36,8 @@ def main():
         ie.add_extension(args.cpu_extension, "CPU")
 
     log.info("Loading network")
-    net = ie.read_network(args.model, os.path.splitext(args.model)[0] + ".bin")
+    # net = ie.read_network(args.model, os.path.splitext(args.model)[0] + ".bin")
+    net = ie.read_network(args.model)
 
     assert len(net.input_info) == 1, "Sample supports only single input topologies"
     assert len(net.outputs) == 1, "Sample supports only single output topologies"
@@ -66,7 +67,10 @@ def main():
     # loading model to the plugin
     log.info("loading model to the plugin")
     exec_net = ie.load_network(network=net, device_name=args.device)
-
+    
+    start = time.time()
+    print("start")
+    
     # start sync inference
     log.info("starting inference")
     res = exec_net.infer(inputs={input_blob: image_input})
@@ -74,6 +78,10 @@ def main():
     # processing output blob
     log.info("processing output blob")
     disp = np.squeeze(res[out_blob][0])
+    
+    end = time.time()
+    print("end")
+    print(end - start)
 
     # resize disp to input resolution
     disp = cv2.resize(disp, (input_width, input_height), cv2.INTER_CUBIC)
@@ -88,13 +96,13 @@ def main():
         disp.fill(0.5)
 
     # pfm
-    out = 'disp.pfm'
-    cv2.imwrite(out, disp)
+#     out = 'disp.pfm'
+#     cv2.imwrite(out, disp)
 
-    log.info("Disparity map was saved to {}".format(out))
+#     log.info("Disparity map was saved to {}".format(out))
 
     # png
-    out = 'disp.png'
+    out = f'{args.input}_disp.png'
     plt.imsave(out, disp, vmin=0, vmax=1, cmap='inferno')
 
     log.info("Color-coded disparity image was saved to {}".format(out))
